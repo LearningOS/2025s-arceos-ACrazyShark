@@ -132,16 +132,64 @@ impl VfsNodeOps for RootDirectory {
         })
     }
 
+    // fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
+    //     self.lookup_mounted_fs(src_path, |fs, rest_path| {
+    //         if rest_path.is_empty() {
+    //             ax_err!(PermissionDenied) // cannot rename mount points
+    //         } else {
+    //             fs.root_dir().rename(rest_path, dst_path)
+    //         }
+    //     })
+    // }
+    // rename
     fn rename(&self, src_path: &str, dst_path: &str) -> VfsResult {
-        self.lookup_mounted_fs(src_path, |fs, rest_path| {
-            if rest_path.is_empty() {
-                ax_err!(PermissionDenied) // cannot rename mount points
-            } else {
-                fs.root_dir().rename(rest_path, dst_path)
+        // 处理源路径
+        // let abs_src = absolute_path(src_path)?;
+
+        // 处理目标路径
+        // let abs_dst = absolute_path(dst_path)?;
+
+
+        // 检查 abs_src 和 abs_dst
+        let abs_src = absolute_path(src_path)?;
+        let abs_dst = absolute_path(dst_path)?;
+
+        // 禁止重命名根目录
+        if abs_src.is_empty() || abs_src == "/" {
+            return ax_err!(PermissionDenied, "cannot rename root directory");
+        }
+
+        // 使用嵌套的 lookup_mounted_fs 处理路径
+        self.lookup_mounted_fs(&abs_src, |src_fs, rest_src| {
+            // 检查源路径是否是挂载点根目录
+            if rest_src.is_empty() {
+                return ax_err!(PermissionDenied, "cannot rename mount point");
             }
+
+            // 处理目标路径
+            self.lookup_mounted_fs(&abs_dst, |dst_fs, rest_dst| {
+                // 检查是否跨文件系统
+                if !Arc::ptr_eq(&src_fs, &dst_fs) {
+                    return ax_err!(Unsupported, "cross-filesystem rename not allowed");
+                }
+
+                // 检查目标路径是否是挂载点
+                if rest_dst.is_empty() {
+                    return ax_err!(PermissionDenied, "cannot overwrite mount point");
+                }
+
+                // 调用底层文件系统的 rename 方法
+                src_fs.root_dir().rename(rest_src, rest_dst)
+            })
         })
     }
 }
+
+
+
+
+
+
 
 pub(crate) fn init_rootfs(disk: crate::dev::Disk) {
     cfg_if::cfg_if! {

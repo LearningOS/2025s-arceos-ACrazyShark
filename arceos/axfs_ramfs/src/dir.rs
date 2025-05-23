@@ -8,6 +8,8 @@ use spin::RwLock;
 
 use crate::file::FileNode;
 
+use crate::alloc::string::ToString;
+
 /// The directory node in the RAM filesystem.
 ///
 /// It implements [`axfs_vfs::VfsNodeOps`].
@@ -16,6 +18,8 @@ pub struct DirNode {
     parent: RwLock<Weak<dyn VfsNodeOps>>,
     children: RwLock<BTreeMap<String, VfsNodeRef>>,
 }
+
+
 
 impl DirNode {
     pub(super) fn new(parent: Option<Weak<dyn VfsNodeOps>>) -> Arc<Self> {
@@ -67,6 +71,37 @@ impl DirNode {
         children.remove(name);
         Ok(())
     }
+
+
+
+
+    /// Rename
+    pub fn rename_node(&self, old: &str, new: &str) -> VfsResult {
+        let mut children = self.children.write();
+        // 移除旧节点
+        let old_node = match children.remove(old) {
+            Some(node) => node,
+            None => return Err(VfsError::NotFound),
+        };
+
+        // 处理新节点存在的情况
+        if let Some(existing_node) = children.get(new) {
+            if let Some(dir_node) = existing_node.as_any().downcast_ref::<DirNode>() {
+                if !dir_node.children.read().is_empty() {
+                    children.insert(old.to_string(), old_node);
+                    return Err(VfsError::DirectoryNotEmpty);
+                }
+            }
+            children.remove(new);
+        }
+
+        children.insert(new.to_string(), old_node);
+        Ok(())
+        
+    }
+
+
+
 }
 
 impl VfsNodeOps for DirNode {
@@ -165,6 +200,22 @@ impl VfsNodeOps for DirNode {
         }
     }
 
+    ///  rename
+    fn rename(&self, old_path: &str, new_path: &str) -> VfsResult {
+
+        let (src_name, src_rest) = split_path(old_path);
+        let (dst_name, dst_rest) = split_path(new_path);
+
+        if src_rest.is_some() || dst_rest.is_some() {
+            return Err(VfsError::Unsupported);
+        }
+
+        self.rename_node(src_name, dst_name)
+      
+    }
+
+
+
     axfs_vfs::impl_vfs_dir_default! {}
 }
 
@@ -174,3 +225,7 @@ fn split_path(path: &str) -> (&str, Option<&str>) {
         (&trimmed_path[..n], Some(&trimmed_path[n + 1..]))
     })
 }
+
+
+
+
