@@ -40,7 +40,7 @@ make[2]: Entering directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos
 make[2]: Leaving directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos/payload/skernel2'
 make[1]: Leaving directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos/payload'
 Write file 'payload/mapfile_c/mapfile' into disk.img
-sys_mmap default
+sys_mmap pass
     [92;1mCreating[0m FAT32 disk image "disk.img" ...
 mkfs.fat 4.2 (2021-01-31)
 make[1]: Entering directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos/payload'
@@ -69,5 +69,3 @@ make[2]: Entering directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos
 make[2]: Leaving directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos/payload/skernel2'
 make[1]: Leaving directory '/home/crazy/develop/2025s-arceos-ACrazyShark/arceos/payload'
 Write file 'payload/skernel2/skernel2' into disk.img
-simple_hv default
-400

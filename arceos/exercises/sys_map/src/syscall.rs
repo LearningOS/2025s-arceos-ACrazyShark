@@ -1,13 +1,25 @@
 #![allow(dead_code)]
 
 use core::ffi::{c_void, c_char, c_int};
+// use core::task;
 use axhal::arch::TrapFrame;
 use axhal::trap::{register_trap_handler, SYSCALL};
 use axerrno::LinuxError;
+// use axmm::AddrSpace;
 use axtask::current;
 use axtask::TaskExtRef;
 use axhal::paging::MappingFlags;
 use arceos_posix_api as api;
+
+// Physical memory management.
+// use axhal::mem;
+use axhal::mem::{VirtAddr, phys_to_virt};
+// Page table manipulation.
+// use axhal::paging;
+use memory_addr::{MemoryAddr, VirtAddrRange};
+
+use crate::std::vec::Vec;
+
 
 const SYS_IOCTL: usize = 29;
 const SYS_OPENAT: usize = 56;
@@ -100,7 +112,7 @@ bitflags::bitflags! {
 fn handle_syscall(tf: &TrapFrame, syscall_num: usize) -> isize {
     ax_println!("handle_syscall [{}] ...", syscall_num);
     let ret = match syscall_num {
-         SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
+        SYS_IOCTL => sys_ioctl(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _) as _,
         SYS_SET_TID_ADDRESS => sys_set_tid_address(tf.arg0() as _),
         SYS_OPENAT => sys_openat(tf.arg0() as _, tf.arg1() as _, tf.arg2() as _, tf.arg3() as _),
         SYS_CLOSE => sys_close(tf.arg0() as _),
@@ -140,8 +152,122 @@ fn sys_mmap(
     fd: i32,
     _offset: isize,
 ) -> isize {
-    unimplemented!("no sys_mmap!");
+    // unimplemented!("no sys_mmap!");
+    // 实现sys_mmap
+    // addr 需要映射的开始地址
+    // lenght 地址空间大小
+    // prot rwx读写权限
+    // flags 映射类型和行为的控制标志
+    // fd 关联的文件描述符
+    //_offset 文件映射的起始偏移量
+
+    // 检查length有效性
+    // if length == 0 {
+    //     return -LinuxError::EINVAL.code() as isize;
+    // }
+    // let mut lazy = true;
+
+    // let flags = MappingFlags::from_bits_truncate(flags.try_into().unwrap());
+    // let ports = MappingFlags::from_bits_truncate(prot.try_into().unwrap());
+    
+    // let task = current();
+    // let mut uspace = task.task_ext().aspace.lock();
+
+    // let va_start = VirtAddr::from(addr as usize).align_down_4k();
+    // let va_end = VirtAddr::from(addr as usize + length).align_up_4k();
+    // // let va_range = VirtAddrRange::new(
+    // //     va_start,
+    // //     va_end
+    // // );
+    // // let va_max_range = VirtAddrRange::from_start_size(
+    // //     VirtAddr::from_usize(0),
+    // //     usize::MAX,
+    // // );
+
+    // // if let _start = uspace.find_free_area(VirtAddr::from(0), va_end - va_start, va_max_range).unwrap() {
+        
+    // uspace.map_alloc(va_start, va_end - va_start, flags, !lazy).unwrap();
+    // // }
+    // va_start.as_usize() as isize
+
+    // check length
+    if length == 0 {
+        return -LinuxError::EINVAL.code() as isize;
+    }
+
+    let mmap_flags = MmapFlags::from_bits_truncate(flags);
+    let is_anonymous = mmap_flags.contains(MmapFlags::MAP_ANONYMOUS);
+    let mut lazy = true;
+
+    let mut buf = Vec::new();
+    if !is_anonymous {
+        if fd == -1 {
+            return -LinuxError::EBADF.code() as isize;
+        }
+        // Simplified file reading: read entire length
+        buf.resize(length, 0u8);
+        let size = api::sys_read(fd, buf.as_mut_ptr() as *mut c_void, length);
+        if size < 0 {
+            return -LinuxError::EIO.code() as isize;
+        }
+        lazy = false;
+    }
+
+    let mut mapping_flags = MappingFlags::USER;
+    if prot & MmapProt::PROT_READ.bits() != 0 {
+        mapping_flags |= MappingFlags::READ;
+    }
+    if prot & MmapProt::PROT_WRITE.bits() != 0 {
+        mapping_flags |= MappingFlags::WRITE;
+    }
+    if prot & MmapProt::PROT_EXEC.bits() != 0 {
+        mapping_flags |= MappingFlags::EXECUTE;
+    }
+
+    let task = current();
+    let mut uspace = task.task_ext().aspace.lock();
+
+    let va_start = if addr.is_null() {
+        const USER_ASPACE_BASE: usize = 0x0000;
+        const USER_ASPACE_SIZE: usize = 0x40_0000_0000;
+        let limit = VirtAddrRange::new(USER_ASPACE_BASE.into(), USER_ASPACE_SIZE.into());
+        let vaddr = uspace
+            .find_free_area(0.into(), length, limit)
+            .ok_or(LinuxError::ENOMEM)
+            .unwrap();
+        vaddr
+    } else {
+        VirtAddr::from(addr as usize)
+    }.align_down_4k();
+
+    let va_end = (va_start + length).align_up_4k();
+    let size = va_end - va_start;
+
+    // Map the virtual address range
+    uspace
+        .map_alloc(va_start, size, mapping_flags, !lazy)
+        .map_err(|_| LinuxError::ENOMEM)
+        .unwrap();
+
+    // Copy data for non-lazy file-backed mappings
+    if !is_anonymous && !lazy {
+        let (paddr, _, _) = uspace
+            .page_table()
+            .query(va_start.into())
+            .expect("Failed to query page table");
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                buf.as_ptr(),
+                phys_to_virt(paddr).as_mut_ptr(),
+                buf.len(),
+            );
+        }
+    }
+
+    va_start.as_usize() as isize
+
 }
+
 
 fn sys_openat(dfd: c_int, fname: *const c_char, flags: c_int, mode: api::ctypes::mode_t) -> isize {
     assert_eq!(dfd, AT_FDCWD);
@@ -174,3 +300,5 @@ fn sys_ioctl(_fd: i32, _op: usize, _argp: *mut c_void) -> i32 {
     ax_println!("Ignore SYS_IOCTL");
     0
 }
+
+

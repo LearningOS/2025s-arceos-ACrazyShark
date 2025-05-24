@@ -27,6 +27,8 @@ use loader::load_vm_image;
 use axhal::mem::PhysAddr;
 use crate::regs::GprIndex::{A0, A1};
 
+use scause::{Exception, Interrupt, Trap};
+
 const VM_ENTRY: usize = 0x8020_0000;
 
 #[cfg_attr(feature = "axstd", no_mangle)]
@@ -102,16 +104,24 @@ fn vmexit_handler(ctx: &mut VmCpuRegisters) -> bool {
             }
         },
         Trap::Exception(Exception::IllegalInstruction) => {
+            ctx.guest_regs.gprs.set_reg(A1, 0x1234);
+            ctx.guest_regs.sepc += 4;
             panic!("Bad instruction: {:#x} sepc: {:#x}",
                 stval::read(),
                 ctx.guest_regs.sepc
             );
         },
         Trap::Exception(Exception::LoadGuestPageFault) => {
+            ctx.guest_regs.gprs.set_reg(regs::GprIndex::A0, 0x6688);
+            ctx.guest_regs.sepc += 4;
             panic!("LoadGuestPageFault: stval{:#x} sepc: {:#x}",
                 stval::read(),
                 ctx.guest_regs.sepc
             );
+        },
+        Trap::Interrupt(Interrupt::SupervisorTimer) => {
+            // interrupt
+            ctx.guest_regs.sepc += 4;
         },
         _ => {
             panic!(
